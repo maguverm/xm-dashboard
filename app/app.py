@@ -2,11 +2,15 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+from pathlib import Path
 
 st.title("Precio de Bolsa Nacional - XM")
 st.subheader("Precio promedio diario ($/kWh)")
 
-df = pd.read_csv("../data/processed/precio_bolsa_limpio.csv")
+BASE_DIR = Path(__file__).resolve().parent.parent
+ruta_datos = BASE_DIR / "data" / "processed" / "precio_bolsa_limpio.csv"
+
+df = pd.read_csv(ruta_datos)
 
 df["fecha"] = pd.to_datetime(df["fecha"])
 
