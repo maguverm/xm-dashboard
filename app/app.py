@@ -301,5 +301,92 @@ if pagina == "Precio Bolsa":
     st.dataframe(df_resultado)
 
 elif pagina == "Precio Oferta":
+
     st.title("Precio de Oferta - XM")
-    st.info("Sección en construcción. Aquí agregaremos análisis por agente y por planta.")
+
+    # cargar datos
+    from pathlib import Path
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    ruta = BASE_DIR / "data" / "processed" / "precio_oferta_limpio.csv"
+
+    df = pd.read_csv(ruta)
+    df["fecha"] = pd.to_datetime(df["fecha"])
+
+    # filtro de fechas
+    fecha_min = df["fecha"].min()
+    fecha_max = df["fecha"].max()
+
+    fecha_inicio, fecha_fin = st.date_input(
+        "Selecciona el rango de fechas",
+        value=(fecha_max - pd.Timedelta(days=30), fecha_max),
+        min_value=fecha_min,
+        max_value=fecha_max
+    )
+
+    df_filtrado = df[
+        (df["fecha"] >= pd.to_datetime(fecha_inicio)) &
+        (df["fecha"] <= pd.to_datetime(fecha_fin))
+    ]
+
+    # agrupación simple
+    # Filtro de planta
+    plantas = sorted(df_filtrado["NombreUnidad"].dropna().unique())
+
+    plantas_seleccionadas = st.multiselect(
+        "Filtrar plantas",
+        options=plantas,
+        default=[]
+    )
+
+    if plantas_seleccionadas:
+        df_filtrado = df_filtrado[
+            df_filtrado["NombreUnidad"].isin(plantas_seleccionadas)
+        ]
+
+    # Promedio diario por planta
+    df_diario_oferta = (
+        df_filtrado
+        .groupby(["CodigoPlanta", "NombreUnidad", "fecha"], as_index=False)["precio_oferta"]
+        .mean()
+    )
+
+    # Ordenar plantas por precio promedio descendente
+    orden_plantas = (
+        df_diario_oferta
+        .groupby(["CodigoPlanta", "NombreUnidad"], as_index=False)["precio_oferta"]
+        .mean()
+        .sort_values("precio_oferta", ascending=False)
+    )
+
+    # Tabla matriz: filas = plantas, columnas = días
+    tabla_matriz = df_diario_oferta.pivot_table(
+        index=["CodigoPlanta", "NombreUnidad"],
+        columns="fecha",
+        values="precio_oferta",
+        aggfunc="mean"
+    )
+
+    # Reordenar filas según precio promedio
+    orden_index = list(
+        orden_plantas.set_index(["CodigoPlanta", "NombreUnidad"]).index
+    )
+
+    tabla_matriz = tabla_matriz.reindex(orden_index)
+
+    # Redondear a enteros
+    tabla_matriz = tabla_matriz.round(0).astype("Int64")
+
+    # Formato de columnas de fecha
+    tabla_matriz.columns = [
+        col.strftime("%Y-%m-%d") for col in tabla_matriz.columns
+    ]
+
+    st.subheader("Precio de oferta por planta y día")
+
+    st.dataframe(
+    tabla_matriz.style.background_gradient(
+        cmap="RdYlGn_r",
+        axis=None
+    ),
+    use_container_width=True
+)
