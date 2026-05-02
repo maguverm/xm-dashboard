@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import date, datetime
 from pathlib import Path
 import time
+import re
+import unicodedata
 
 dataset_id = "b1189f"
 
@@ -11,7 +13,40 @@ fecha_inicio = date(2024, 1, 1)
 fecha_fin = datetime.today().date()
 
 ruta_maestro = Path("../data/processed/maestro_plantas.csv")
+ruta_operadores = Path("../data/processed/mapa_operadores.csv")
 ruta_salida = Path("../data/processed/precio_oferta_limpio.csv")
+
+
+def limpiar_nombre(nombre):
+    if pd.isna(nombre):
+        return nombre
+
+    nombre = str(nombre).upper()
+
+    nombre = unicodedata.normalize("NFKD", nombre)
+    nombre = "".join(c for c in nombre if not unicodedata.combining(c))
+
+    nombre = re.sub(r"\s\d+$", "", nombre)
+    nombre = re.sub(r"\sG\d+$", "", nombre)
+    nombre = re.sub(r"\sCC\s*\d*$", " CC", nombre)
+
+    return nombre.strip()
+
+
+ajustes_manual_nombre = {
+    "FLORES": "FLORES",
+    "GUADALUPE": "GUADALUPE",
+    "RIO PIEDRAS": "RIO PIEDRAS",
+    "TEBSA": "TEBSA",
+    "TERMOCENTRO": "TERMOCENTRO",
+    "TERMOEMCALI": "TERMOEMCALI",
+    "TERMOSIERRA": "TERMOSIERRA CC",
+    "TERMOVALLE": "TERMOVALLE",
+}
+
+ajustes_operador_codigo = {
+    "TSR1": "EMPRESAS PUBLICAS DE MEDELLIN E.S.P.",  # TERMOSIERRA
+}
 
 
 def generar_meses(inicio, fin):
@@ -84,7 +119,6 @@ for i, (inicio_mes, fin_mes) in enumerate(meses, start=1):
 
         df_mes["fecha"] = df_mes["FechaHora"].dt.date
 
-        # Promedio diario por planta
         df_mes = (
             df_mes
             .groupby(["fecha", "CodigoPlanta"], as_index=False)["precio_oferta"]
@@ -106,7 +140,6 @@ if not lista_df:
 
 df = pd.concat(lista_df, ignore_index=True)
 
-# Por seguridad: eliminar duplicados entre meses
 df = (
     df
     .groupby(["fecha", "CodigoPlanta"], as_index=False)["precio_oferta"]
@@ -114,6 +147,7 @@ df = (
 )
 
 maestro = pd.read_csv(ruta_maestro)
+mapa_operadores = pd.read_csv(ruta_operadores)
 
 df = df.merge(
     maestro,
@@ -121,8 +155,22 @@ df = df.merge(
     how="left"
 )
 
+df["NombreUnidad_clean"] = df["NombreUnidad"].apply(limpiar_nombre)
+df["NombreUnidad_clean"] = df["NombreUnidad_clean"].replace(ajustes_manual_nombre)
+
+df = df.merge(
+    mapa_operadores[["Nombre_clean", "Operador"]],
+    left_on="NombreUnidad_clean",
+    right_on="Nombre_clean",
+    how="left"
+)
+
+for codigo, operador in ajustes_operador_codigo.items():
+    df.loc[df["CodigoPlanta"] == codigo, "Operador"] = operador
+
 df = df[[
     "fecha",
+    "Operador",
     "CodigoPlanta",
     "NombreUnidad",
     "TipoGeneracion",
@@ -140,4 +188,16 @@ print("Archivo creado:", ruta_salida)
 print("Filas finales:", len(df))
 print("Primera fecha:", df["fecha"].min())
 print("Última fecha:", df["fecha"].max())
-print(df.head())
+
+print("\nOperadores faltantes:")
+print(df["Operador"].isna().sum())
+
+plantas_sin_operador = (
+    df[df["Operador"].isna()]
+    [["CodigoPlanta", "NombreUnidad", "TipoGeneracion"]]
+    .drop_duplicates()
+    .sort_values("NombreUnidad")
+)
+
+print("\nPlantas sin operador:")
+print(plantas_sin_operador.to_string(index=False))

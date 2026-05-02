@@ -304,21 +304,20 @@ elif pagina == "Precio Oferta":
 
     st.title("Precio de Oferta - XM")
 
-    # cargar datos
     from pathlib import Path
+
     BASE_DIR = Path(__file__).resolve().parent.parent
     ruta = BASE_DIR / "data" / "processed" / "precio_oferta_limpio.csv"
 
     df = pd.read_csv(ruta)
     df["fecha"] = pd.to_datetime(df["fecha"])
 
-    # filtro de fechas
     fecha_min = df["fecha"].min()
     fecha_max = df["fecha"].max()
 
     fecha_inicio, fecha_fin = st.date_input(
         "Selecciona el rango de fechas",
-        value=(fecha_max - pd.Timedelta(days=30), fecha_max),
+        value=(fecha_max - pd.Timedelta(days=180), fecha_max),
         min_value=fecha_min,
         max_value=fecha_max
     )
@@ -326,67 +325,251 @@ elif pagina == "Precio Oferta":
     df_filtrado = df[
         (df["fecha"] >= pd.to_datetime(fecha_inicio)) &
         (df["fecha"] <= pd.to_datetime(fecha_fin))
-    ]
+    ].copy()
 
-    # agrupación simple
-    # Filtro de planta
+    operadores = sorted(df_filtrado["Operador"].dropna().unique())
+
+    operadores_seleccionados = st.multiselect(
+        "Filtrar por operador",
+        options=operadores,
+        placeholder="Seleccione uno o varios operadores"
+    )
+
+    if operadores_seleccionados:
+        df_filtrado = df_filtrado[
+            df_filtrado["Operador"].isin(operadores_seleccionados)
+        ].copy()
+
+    tipos = sorted(df_filtrado["TipoGeneracion"].dropna().unique())
+
+    tipos_seleccionados = st.multiselect(
+        "Filtrar por tipo de generación",
+        options=tipos,
+        placeholder="Seleccione uno o varios tipos"
+    )
+
+    if tipos_seleccionados:
+        df_filtrado = df_filtrado[
+            df_filtrado["TipoGeneracion"].isin(tipos_seleccionados)
+        ].copy()
+
     plantas = sorted(df_filtrado["NombreUnidad"].dropna().unique())
 
     plantas_seleccionadas = st.multiselect(
         "Filtrar plantas",
         options=plantas,
-        default=[]
+        placeholder="Seleccione una o varias plantas"
     )
 
     if plantas_seleccionadas:
         df_filtrado = df_filtrado[
             df_filtrado["NombreUnidad"].isin(plantas_seleccionadas)
-        ]
+        ].copy()
 
-    # Promedio diario por planta
     df_diario_oferta = (
         df_filtrado
-        .groupby(["CodigoPlanta", "NombreUnidad", "fecha"], as_index=False)["precio_oferta"]
+        .groupby(
+            ["Operador", "TipoGeneracion", "CodigoPlanta", "NombreUnidad", "fecha"],
+            as_index=False
+        )["precio_oferta"]
         .mean()
     )
 
-    # Ordenar plantas por precio promedio descendente
-    orden_plantas = (
+    st.subheader("Precio de oferta promedio por operador")
+
+    df_operador = (
         df_diario_oferta
-        .groupby(["CodigoPlanta", "NombreUnidad"], as_index=False)["precio_oferta"]
+        .groupby(["Operador", "fecha"], as_index=False)["precio_oferta"]
         .mean()
-        .sort_values("precio_oferta", ascending=False)
     )
 
-    # Tabla matriz: filas = plantas, columnas = días
-    tabla_matriz = df_diario_oferta.pivot_table(
-        index=["CodigoPlanta", "NombreUnidad"],
+    tabla_operador = df_operador.pivot_table(
+        index="Operador",
         columns="fecha",
         values="precio_oferta",
         aggfunc="mean"
     )
 
-    # Reordenar filas según precio promedio
+    orden_operador = (
+        df_operador
+        .groupby("Operador", as_index=False)["precio_oferta"]
+        .mean()
+        .sort_values("precio_oferta", ascending=False)
+    )
+
+    tabla_operador = tabla_operador.reindex(orden_operador["Operador"])
+    tabla_operador = tabla_operador.round(0).astype("Int64")
+
+    tabla_operador.columns = [
+        col.strftime("%Y-%m-%d") for col in tabla_operador.columns
+    ]
+
+    st.dataframe(
+        tabla_operador.style.background_gradient(cmap="RdYlGn_r", axis=None),
+        use_container_width=True
+    )
+
+    st.subheader("Precio de oferta promedio por tipo de generación")
+
+    df_tipo = (
+        df_diario_oferta
+        .groupby(["TipoGeneracion", "fecha"], as_index=False)["precio_oferta"]
+        .mean()
+    )
+
+    tabla_tipo = df_tipo.pivot_table(
+        index="TipoGeneracion",
+        columns="fecha",
+        values="precio_oferta",
+        aggfunc="mean"
+    )
+
+    tabla_tipo = tabla_tipo.round(0).astype("Int64")
+
+    tabla_tipo.columns = [
+        col.strftime("%Y-%m-%d") for col in tabla_tipo.columns
+    ]
+
+    st.dataframe(
+        tabla_tipo.style.background_gradient(cmap="RdYlGn_r", axis=None),
+        use_container_width=True
+    )
+
+    st.subheader("Precio de oferta por operador, planta y día")
+
+    orden_plantas = (
+        df_diario_oferta
+        .groupby(
+            ["Operador", "TipoGeneracion", "CodigoPlanta", "NombreUnidad"],
+            as_index=False
+        )["precio_oferta"]
+        .mean()
+        .sort_values("precio_oferta", ascending=False)
+    )
+
+    tabla_matriz = df_diario_oferta.pivot_table(
+        index=["Operador", "TipoGeneracion", "CodigoPlanta", "NombreUnidad"],
+        columns="fecha",
+        values="precio_oferta",
+        aggfunc="mean"
+    )
+
     orden_index = list(
-        orden_plantas.set_index(["CodigoPlanta", "NombreUnidad"]).index
+        orden_plantas
+        .set_index(["Operador", "TipoGeneracion", "CodigoPlanta", "NombreUnidad"])
+        .index
     )
 
     tabla_matriz = tabla_matriz.reindex(orden_index)
-
-    # Redondear a enteros
     tabla_matriz = tabla_matriz.round(0).astype("Int64")
 
-    # Formato de columnas de fecha
+    promedios = (
+        orden_plantas
+        .set_index(["Operador", "TipoGeneracion", "CodigoPlanta", "NombreUnidad"])
+        ["precio_oferta"]
+        .round(0)
+        .astype("Int64")
+    )
+
+    tabla_matriz.insert(
+        0,
+        "Promedio periodo",
+        promedios.reindex(tabla_matriz.index)
+    )
+
     tabla_matriz.columns = [
-        col.strftime("%Y-%m-%d") for col in tabla_matriz.columns
+        col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else col
+        for col in tabla_matriz.columns
     ]
 
-    st.subheader("Precio de oferta por planta y día")
-
     st.dataframe(
-    tabla_matriz.style.background_gradient(
-        cmap="RdYlGn_r",
-        axis=None
-    ),
-    use_container_width=True
-)
+        tabla_matriz.style.background_gradient(cmap="RdYlGn_r", axis=None),
+        use_container_width=True
+    )
+
+    st.subheader("Top 10 operadores con mayor precio de oferta promedio")
+
+    top_operadores = (
+        df_diario_oferta
+        .groupby("Operador", as_index=False)["precio_oferta"]
+        .mean()
+        .sort_values("precio_oferta", ascending=False)
+        .head(10)
+    )
+
+    top_operadores["precio_oferta"] = (
+        top_operadores["precio_oferta"]
+        .round(0)
+        .astype(int)
+    )
+
+    fig_top_operadores = px.bar(
+        top_operadores,
+        x="precio_oferta",
+        y="Operador",
+        orientation="h",
+        text="precio_oferta",
+        labels={
+            "precio_oferta": "Precio de Oferta Promedio ($/kWh)",
+            "Operador": "Operador"
+        }
+    )
+
+    fig_top_operadores.update_traces(
+        texttemplate="%{text:,.0f}",
+        textposition="outside"
+    )
+
+    fig_top_operadores.update_layout(
+        yaxis=dict(autorange="reversed"),
+        xaxis=dict(title="Precio de Oferta Promedio ($/kWh)"),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=450
+    )
+
+    st.plotly_chart(fig_top_operadores, use_container_width=True)
+
+    st.subheader("Evolución del precio de oferta por planta")
+
+    for tipo in sorted(df_diario_oferta["TipoGeneracion"].dropna().unique()):
+
+        df_tipo_grafica = df_diario_oferta[
+            df_diario_oferta["TipoGeneracion"] == tipo
+        ].copy()
+
+        if df_tipo_grafica.empty:
+            continue
+
+        fig = px.line(
+            df_tipo_grafica,
+            x="fecha",
+            y="precio_oferta",
+            color="NombreUnidad",
+            labels={
+                "fecha": "Fecha",
+                "precio_oferta": "Precio de Oferta ($/kWh)",
+                "NombreUnidad": "Planta"
+            },
+            title=f"Tipo de generación: {tipo}"
+        )
+
+        fig.update_layout(
+            xaxis=dict(
+                tickformat="%d-%b-%Y",
+                tickangle=30
+            ),
+            yaxis=dict(
+                title="Precio de Oferta ($/kWh)"
+            ),
+            legend=dict(
+                orientation="h",
+                y=-0.25,
+                x=0
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            height=500
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
