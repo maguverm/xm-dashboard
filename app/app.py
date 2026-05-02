@@ -4,6 +4,22 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 
+def quitar_outliers_iqr(df, col_valor, col_grupo):
+    def filtrar(grupo):
+        q1 = grupo[col_valor].quantile(0.25)
+        q3 = grupo[col_valor].quantile(0.75)
+        iqr = q3 - q1
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        return grupo[
+            (grupo[col_valor] >= lower) &
+            (grupo[col_valor] <= upper)
+        ]
+
+    return df.groupby(col_grupo, group_keys=False).apply(filtrar)
+
 pagina = st.sidebar.radio(
     "Menú",
     ["Precio Bolsa", "Precio Oferta"]
@@ -365,6 +381,8 @@ elif pagina == "Precio Oferta":
         df_filtrado = df_filtrado[
             df_filtrado["NombreUnidad"].isin(plantas_seleccionadas)
         ].copy()
+    
+    quitar_atipicos = st.checkbox("Quitar valores atípicos", value=False)
 
     df_diario_oferta = (
         df_filtrado
@@ -374,6 +392,13 @@ elif pagina == "Precio Oferta":
         )["precio_oferta"]
         .mean()
     )
+
+    if quitar_atipicos:
+        df_diario_oferta = quitar_outliers_iqr(
+            df_diario_oferta,
+            col_valor="precio_oferta",
+            col_grupo="CodigoPlanta"
+        )
 
     st.subheader("Precio de oferta promedio por operador")
 
