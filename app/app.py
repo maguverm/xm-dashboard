@@ -5,20 +5,22 @@ import plotly.graph_objects as go
 from pathlib import Path
 
 def quitar_outliers_iqr(df, col_valor, col_grupo):
-    def filtrar(grupo):
-        q1 = grupo[col_valor].quantile(0.25)
-        q3 = grupo[col_valor].quantile(0.75)
-        iqr = q3 - q1
+    df = df.copy()
 
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
+    q1 = df.groupby(col_grupo)[col_valor].transform(lambda x: x.quantile(0.25))
+    q3 = df.groupby(col_grupo)[col_valor].transform(lambda x: x.quantile(0.75))
 
-        return grupo[
-            (grupo[col_valor] >= lower) &
-            (grupo[col_valor] <= upper)
-        ]
+    iqr = q3 - q1
 
-    return df.groupby(col_grupo, group_keys=False).apply(filtrar)
+    limite_inferior = q1 - 1.5 * iqr
+    limite_superior = q3 + 1.5 * iqr
+
+    df_filtrado = df[
+        (df[col_valor] >= limite_inferior) &
+        (df[col_valor] <= limite_superior)
+    ].copy()
+
+    return df_filtrado
 
 pagina = st.sidebar.radio(
     "Menú",
