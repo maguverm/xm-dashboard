@@ -22,9 +22,11 @@ def quitar_outliers_iqr(df, col_valor, col_grupo):
 
     return df_filtrado
 
+st.sidebar.markdown("## 📊 Panel de Análisis")
+st.sidebar.markdown("---")
 pagina = st.sidebar.radio(
-    "Menú",
-    ["Precio Bolsa", "Precio Oferta"]
+    "Selecciona una opción:",
+    ["Precio Bolsa", "Precio Oferta", "Generación"]
 )
 
 if pagina == "Precio Bolsa":
@@ -600,3 +602,362 @@ elif pagina == "Precio Oferta":
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
+
+#######PANEL DE GENERACIÓN#########
+
+elif pagina == "Generación":
+    ###Cargar datos
+    from pathlib import Path
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    ruta = BASE_DIR / "data" / "processed" / "generacion_limpia.csv"
+
+    df = pd.read_csv(ruta)
+    df["fecha"] = pd.to_datetime(df["fecha"])
+
+    # -----------------------
+    # Filtro de fechas
+    # -----------------------
+    fecha_min = df["fecha"].min()
+    fecha_max = df["fecha"].max()
+
+    fecha_inicio, fecha_fin = st.date_input(
+        "Selecciona el rango de fechas",
+        value=(fecha_min, fecha_max),
+        min_value=fecha_min,
+        max_value=fecha_max
+    )
+
+    df_filtrado = df[
+        (df["fecha"] >= pd.to_datetime(fecha_inicio)) &
+        (df["fecha"] <= pd.to_datetime(fecha_fin))
+    ].copy()
+
+    # -----------------------
+    # Filtro operador
+    # -----------------------
+    operadores = sorted(df_filtrado["Operador"].dropna().unique())
+
+    operadores_seleccionados = st.multiselect(
+        "Filtrar por operador",
+        options=operadores,
+        placeholder="Seleccione uno o varios operadores"
+    )
+
+    if operadores_seleccionados:
+        df_filtrado = df_filtrado[
+            df_filtrado["Operador"].isin(operadores_seleccionados)
+        ].copy()
+
+    # -----------------------
+    # Filtro tipo generación
+    # -----------------------
+    tipos = sorted(df_filtrado["TipoGeneracion"].dropna().unique())
+
+    tipos_seleccionados = st.multiselect(
+        "Filtrar por tipo de generación",
+        options=tipos,
+        placeholder="Seleccione uno o varios tipos"
+    )
+
+    if tipos_seleccionados:
+        df_filtrado = df_filtrado[
+            df_filtrado["TipoGeneracion"].isin(tipos_seleccionados)
+        ].copy()
+
+    # -----------------------
+    # Filtro planta
+    # -----------------------
+    plantas = sorted(df_filtrado["NombreUnidad"].dropna().unique())
+
+    plantas_seleccionadas = st.multiselect(
+        "Filtrar plantas",
+        options=plantas,
+        placeholder="Seleccione una o varias plantas"
+    )
+
+    if plantas_seleccionadas:
+        df_filtrado = df_filtrado[
+            df_filtrado["NombreUnidad"].isin(plantas_seleccionadas)
+        ].copy()
+    
+    ##### Generación real total diaria
+
+    st.subheader("Generación real total diaria")
+
+    df_total_diario = (
+        df_filtrado
+        .groupby("fecha", as_index=False)["gen_real"]
+        .sum()
+    )
+
+    fig_gen_total = px.line(
+        df_total_diario,
+        x="fecha",
+        y="gen_real",
+        labels={
+            "fecha": "Fecha",
+            "gen_real": "Generación real"
+        }
+    )
+
+    fig_gen_total.update_layout(
+        xaxis=dict(
+            tickformat="%d-%b-%Y",
+            tickangle=30
+        ),
+        yaxis=dict(
+            title="Generación real"
+        ),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=450
+    )
+
+    st.plotly_chart(fig_gen_total, use_container_width=True)
+
+    ###Grafico por tipo de generación
+
+    st.subheader("Generación por tipo")
+
+    df_tipo = (
+        df_filtrado
+        .groupby(["fecha", "TipoGeneracion"], as_index=False)["gen_real"]
+        .sum()
+    )
+
+    # 🎨 Colores personalizados
+
+    colores = {
+        "Hidraulica": "rgba(0, 0, 255, 1)",     # azul sólido
+        "Solar": "rgba(255, 215, 0, 1)",        # amarillo sólido
+        "Termica": "rgba(50, 50, 50, 1)",       # gris oscuro
+        "Eolica": "rgba(0, 128, 0, 1)"          # verde
+    }
+
+    orden_tipos = ["Solar", "Eolica", "Hidraulica", "Termica"]
+
+    df_tipo["TipoGeneracion"] = pd.Categorical(
+        df_tipo["TipoGeneracion"],
+        categories=orden_tipos,
+        ordered=True
+    )
+
+    df_tipo = df_tipo.sort_values(["fecha", "TipoGeneracion"])
+
+    import plotly.graph_objects as go
+
+    fig_tipo = go.Figure()
+
+    for tipo in orden_tipos:
+        df_temp = df_tipo[df_tipo["TipoGeneracion"] == tipo]
+
+        if df_temp.empty:
+            continue
+
+        fig_tipo.add_trace(go.Scatter(
+            x=df_temp["fecha"],
+            y=df_temp["gen_real"],
+            mode="lines",
+            name=tipo,
+            stackgroup="one",
+            line=dict(width=0),
+            fillcolor=colores[tipo]
+        ))
+
+    fig_tipo.update_layout(
+        xaxis=dict(
+            title="Fecha",
+            tickformat="%d-%b-%Y",
+            tickangle=30
+        ),
+        yaxis=dict(
+            title="Generación"
+        ),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=500
+    )
+
+    st.plotly_chart(fig_tipo, use_container_width=True)
+
+    ###Generación por operador
+
+    import plotly.graph_objects as go
+
+    st.subheader("Generación por operador")
+
+    df_operador = (
+        df_filtrado
+        .groupby(["fecha", "Operador"], as_index=False)["gen_real"]
+        .sum()
+    )
+
+    # Top 10 operadores
+    top_operadores = (
+        df_operador
+        .groupby("Operador", as_index=False)["gen_real"]
+        .sum()
+        .sort_values("gen_real", ascending=False)
+        .head(10)["Operador"]
+    )
+
+    df_operador = df_operador[
+        df_operador["Operador"].isin(top_operadores)
+    ]
+
+    # Orden (opcional pero recomendado)
+    orden_operadores = list(top_operadores)
+
+    df_operador["Operador"] = pd.Categorical(
+        df_operador["Operador"],
+        categories=orden_operadores,
+        ordered=True
+    )
+
+    df_operador = df_operador.sort_values(["fecha", "Operador"])
+
+    # 🎨 Puedes dejar colores automáticos o definirlos después
+    fig_operador = go.Figure()
+
+    for op in orden_operadores:
+        df_temp = df_operador[df_operador["Operador"] == op]
+
+        if df_temp.empty:
+            continue
+
+        fig_operador.add_trace(go.Scatter(
+            x=df_temp["fecha"],
+            y=df_temp["gen_real"],
+            mode="lines",
+            name=op,
+            stackgroup="one",
+            line=dict(width=0)
+        ))
+
+    fig_operador.update_layout(
+        xaxis=dict(
+            title="Fecha",
+            tickformat="%d-%b-%Y",
+            tickangle=30
+        ),
+        yaxis=dict(
+            title="Generación"
+        ),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=500
+    )
+
+    st.plotly_chart(fig_operador, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Desviaciones (Real vs Programado)")
+
+    st.subheader("Desviación total diaria")
+
+    # Crear desviación
+    df_filtrado["desviacion"] = df_filtrado["gen_real"] - df_filtrado["gen_prog"]
+
+    # Agrupar por día
+    df_desv_total = (
+        df_filtrado
+        .groupby("fecha", as_index=False)["desviacion"]
+        .sum()
+    )
+
+    # Gráfico
+    fig_desv_total = px.line(
+        df_desv_total,
+        x="fecha",
+        y="desviacion",
+        labels={
+            "fecha": "Fecha",
+            "desviacion": "Desviación (Real - Programado)"
+        }
+    )
+
+    # Línea en 0 (MUY importante)
+    fig_desv_total.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color="black"
+    )
+
+    fig_desv_total.update_layout(
+        xaxis=dict(
+            tickformat="%d-%b-%Y",
+            tickangle=30
+        ),
+        yaxis=dict(
+            title="Desviación"
+        ),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=450
+    )
+
+    st.plotly_chart(fig_desv_total, use_container_width=True)
+
+    ###Ranking desviaciones
+
+    st.subheader("Top operadores con mayor desviación promedio")
+
+    df_desv_operador = (
+        df_filtrado
+        .groupby("Operador", as_index=False)["desviacion"]
+        .mean()
+        .sort_values("desviacion", key=abs, ascending=False)
+        .head(10)
+    )
+
+    fig_desv_operador = px.bar(
+        df_desv_operador,
+        x="desviacion",
+        y="Operador",
+        orientation="h",
+        labels={
+            "desviacion": "Desviación promedio",
+            "Operador": "Operador"
+        }
+    )
+
+    fig_desv_operador.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=450
+    )
+
+    st.plotly_chart(fig_desv_operador, use_container_width=True)
+
+    #### Desviaciones por planta
+
+    st.subheader("Top plantas con mayor desviación promedio")
+
+    df_desv_planta = (
+        df_filtrado
+        .groupby(["CodigoPlanta", "NombreUnidad"], as_index=False)["desviacion"]
+        .mean()
+        .assign(desv_abs=lambda x: x["desviacion"].abs())
+        .sort_values("desv_abs", ascending=False)
+        .head(10)
+    )
+
+    fig_desv_planta = px.bar(
+        df_desv_planta,
+        x="desviacion",
+        y="NombreUnidad",
+        orientation="h",
+        labels={
+            "desviacion": "Desviación promedio",
+            "NombreUnidad": "Planta"
+        }
+    )
+
+    fig_desv_planta.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=450
+    )
+
+    st.plotly_chart(fig_desv_planta, use_container_width=True)

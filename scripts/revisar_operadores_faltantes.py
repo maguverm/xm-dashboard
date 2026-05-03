@@ -1,7 +1,7 @@
 import pandas as pd
 from pathlib import Path
 
-ruta = Path("../data/processed/precio_oferta_limpio.csv")
+ruta = Path("../data/processed/generacion_limpia.csv")
 
 df = pd.read_csv(ruta)
 
@@ -24,9 +24,9 @@ print(faltantes.head(80).to_string(index=False))
 print("\nTotal plantas sin operador:", len(faltantes))
 
 faltantes.to_csv(
-    "../data/processed/plantas_sin_operador.csv",
+    "../data/processed/plantas_sin_operador_generacion.csv",
     index=False,
     encoding="utf-8-sig"
 )
 
-print("\nArchivo exportado: data/processed/plantas_sin_operador.csv")
+print("\nArchivo exportado: data/processed/plantas_sin_operador_generacion.csv")
